@@ -1,0 +1,14 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    redis-rb (9001.0)
+
+PLATFORMS
+  arm64-darwin-21
+  ruby
+
+DEPENDENCIES
+  redis-rb
+
+BUNDLED WITH
+   2.5.16
