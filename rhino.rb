@@ -31,25 +31,19 @@ module Rhino
       end
     end
 
-    private
-
     def process_queue(key)
-      job = @redis.keys(key)
+      data = @redis.get(key)
 
       Ractor.new [@handler, @redis, key, data] do |handler, redis, key, data|
         data_obj = JSON.parse(data)
         method(handler).call(key.split(':').last, data_obj)
         redis.del(key)
-      end.take
+      end
     end
   end
 end
 
 r = Rhino::Queue.new(name: 'tester')
-
-10.times do |i|
-  r.add(job_name: "job_#{i}", data: { sleep_time: i + 1 })
-end
 
 def handler(job_name, data)
   sleep data['sleep_time'].to_i
@@ -58,9 +52,11 @@ end
 
 Rhino::Worker.new(queue: r, handler: :handler)
 
-sleep 8
+r.add(job_name: 'first_job', data: { sleep_time: 10})
 
-r.add(job_name: 'test_extra', data: { sleep_time: 1 })
+sleep 4
+
+r.add(job_name: 'second_extra', data: { sleep_time: 1 })
 
 loop do
   # keep locally running
