@@ -34,25 +34,39 @@ module Rhino
         actors = []
         max_cores.times do |core|
           actors << Ractor.new(core) do |core|
-            actor_id = "actor_#{core}"
             config = Ractor.receive
-            data = config[:redis].get(config[:key])
-            data_obj = JSON.parse(data)
+            data_obj = JSON.parse(config[:redis].get(config[:key]))
             method(config[:handler]).call(config[:key].split(':').last, data_obj)
             config[:redis].del(config[:key])
           end
         end
 
-        job_key = Ractor.receive
+        # keep alive
+        loop do
+          job_key = Ractor.receive
 
-        actor = actors.pop()
-        actor.send({ key: job_key, redis: redis, handler: handler })
+          # re-pop actors
+          if actors.size == 0
+            max_cores.times do |core|
+              actors << Ractor.new(core) do |core|
+                config = Ractor.receive
+                data_obj = JSON.parse(config[:redis].get(config[:key]))
+                method(config[:handler]).call(config[:key].split(':').last, data_obj)
+                config[:redis].del(config[:key])
+              end
+            end
+          end
+
+          actor = actors.pop()
+          actor.send({ key: job_key, redis: redis, handler: handler })
+        end
       end
     end
 
     def process_queue(key)
       @supervisor.send(key)
     end
+
   end
 end
 
@@ -69,7 +83,12 @@ r.add(job_name: 'first_job', data: { sleep_time: 10 })
 
 sleep 2
 
-r.add(job_name: 'second_extra', data: { sleep_time: 1 })
+r.add(job_name: 'second_extra', data: { sleep_time: 5 })
+
+10.times do |i|
+  sleep 1
+  r.add(job_name: "job_#{i}", data: { sleep_time: 2 })
+end
 
 loop do
   # keep locally running until daamon
