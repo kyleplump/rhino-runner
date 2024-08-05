@@ -4,6 +4,7 @@ module Rhino
   require 'redis'
   require 'json'
   require 'observer'
+  require 'etc'
 
   class Queue
     include Observable
@@ -26,19 +27,31 @@ module Rhino
       @queue = queue
       @handler = handler
       @redis = Redis.new(host: '127.0.0.1', port: 6379, db: 6)
-      Thread.new do
-        @queue.add_observer(self, :process_queue)
+      max_cores = Etc.nprocessors
+      @queue.add_observer(self, :process_queue)
+
+      @supervisor = Ractor.new [max_cores, @redis, @handler] do |max_cores, redis, handler|
+        actors = []
+        max_cores.times do |core|
+          actors << Ractor.new(core) do |core|
+            actor_id = "actor_#{core}"
+            config = Ractor.receive
+            data = config[:redis].get(config[:key])
+            data_obj = JSON.parse(data)
+            method(config[:handler]).call(config[:key].split(':').last, data_obj)
+            config[:redis].del(config[:key])
+          end
+        end
+
+        job_key = Ractor.receive
+
+        actor = actors.pop()
+        actor.send({ key: job_key, redis: redis, handler: handler })
       end
     end
 
     def process_queue(key)
-      data = @redis.get(key)
-
-      Ractor.new [@handler, @redis, key, data] do |handler, redis, key, data|
-        data_obj = JSON.parse(data)
-        method(handler).call(key.split(':').last, data_obj)
-        redis.del(key)
-      end
+      @supervisor.send(key)
     end
   end
 end
@@ -52,12 +65,12 @@ end
 
 Rhino::Worker.new(queue: r, handler: :handler)
 
-r.add(job_name: 'first_job', data: { sleep_time: 10})
+r.add(job_name: 'first_job', data: { sleep_time: 10 })
 
-sleep 4
+sleep 2
 
 r.add(job_name: 'second_extra', data: { sleep_time: 1 })
 
 loop do
-  # keep locally running
+  # keep locally running until daamon
 end
